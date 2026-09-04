@@ -51,8 +51,9 @@ git push -u origin main
 
 ### Локально
 
-Требования: **Node ≥ 22**, **JDK 17**, **Android SDK** (`ANDROID_HOME`,
-лицензии приняты: `sdkmanager --licenses`).
+Требования: **Node ≥ 22**, **JDK 21** (Capacitor 7 требует Java 21;
+`brew install --cask temurin@21` / `apt install openjdk-21-jdk`),
+**Android SDK** (`ANDROID_HOME`, лицензии приняты: `sdkmanager --licenses`).
 
 ```bash
 bash scripts/build-apk.sh        # Linux / macOS
@@ -78,7 +79,7 @@ git add package.json package-lock.json && git commit -m "chore: capacitor toolch
 | push в `main` / ручной запуск | **debug-APK** — артефакт вкладки Actions |
 | тег `v1.0.0` | **подписанный release-APK** |
 
-CI работает на Node 22 + JDK 17 (Temurin) + Android SDK; веб-сборка
+CI работает на Node 22 + JDK 21 (Temurin) + Android SDK; веб-сборка
 проверяется отдельной джобой. Для release-подписи добавьте секреты репозитория:
 
 ```
@@ -94,6 +95,15 @@ ANDROID_KEY_PASSWORD      пароль ключа
 
 Ключ генерируется так:
 `keytool -genkeypair -v -keystore ferrofront.keystore -alias ferrofront -keyalg RSA -keysize 2048 -validity 10000`
+
+### Типовые сбои и лечение
+
+| Ошибка | Причина / фикс |
+|---|---|
+| `invalid source release: 21` | JDK младше 21. Поставьте Temurin 21 (в CI — `java-version: '21'`). |
+| `SDK location not found` | Нет `local.properties` в `android/` или не задан `ANDROID_HOME`. |
+| Gradle не скачивает зависимости | Сетевой экран; укажите зеркало в `~/.gradle/gradle.properties`. |
+| `npx cap: command not found` | Capacitor не установлен: `npm i -D @capacitor/cli @capacitor/android && npm i @capacitor/core`. |
 
 ### Публикация
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ФЕРРОФРОНТ — локальная сборка debug-APK.
-# Требования: Node >= 22, JDK 17, Android SDK (ANDROID_HOME), лицензии приняты.
+# Требования: Node >= 22, JDK 21 (Capacitor 7 требует sourceCompatibility 21),
+# Android SDK (ANDROID_HOME), лицензии приняты (sdkmanager --licenses).
 # Использование: bash scripts/build-apk.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -11,6 +12,14 @@ if [ "$NODE_MAJOR" -lt 22 ]; then
   exit 1
 fi
 echo "✓ Node $(node -v)"
+
+JAVA_MAJOR=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d. -f1)
+if [ "${JAVA_MAJOR:-0}" -lt 21 ]; then
+  echo "✗ Нужен JDK 21+ (требование Capacitor 7). Сейчас: $(java -version 2>&1 | head -n1)" >&2
+  echo "  Linux: sudo apt install openjdk-21-jdk   macOS: brew install --cask temurin@21" >&2
+  exit 1
+fi
+echo "✓ JDK $JAVA_MAJOR"
 
 if [ -z "${ANDROID_HOME:-}" ] && [ -z "${ANDROID_SDK_ROOT:-}" ]; then
   echo "✗ ANDROID_HOME не задан. Установите Android Studio / SDK и укажите путь." >&2

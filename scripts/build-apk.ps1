@@ -1,5 +1,5 @@
 # ФЕРРОФРОНТ — локальная сборка debug-APK (Windows PowerShell).
-# Требования: Node >= 22, JDK 17, Android SDK (ANDROID_HOME), лицензии приняты.
+# Требования: Node >= 22, JDK 21 (Capacitor 7), Android SDK (ANDROID_HOME), лицензии приняты.
 # Использование: powershell -ExecutionPolicy Bypass -File scripts/build-apk.ps1
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot)
@@ -7,6 +7,11 @@ Set-Location (Split-Path $PSScriptRoot)
 $nodeMajor = [int]((node -p "process.versions.node.split('.')[0]"))
 if ($nodeMajor -lt 22) { Write-Error "Нужен Node >= 22 (сейчас $(node -v)). См. .nvmrc."; exit 1 }
 Write-Host "Node $(node -v) — OK"
+
+$javaVer = (& java -version 2>&1 | Select-Object -First 1) -replace '.*version "([^"]+)".*', '$1'
+$javaMajor = [int]($javaVer.Split('.')[0])
+if ($javaMajor -lt 21) { Write-Error "Нужен JDK 21+ (требование Capacitor 7). Сейчас: $javaVer"; exit 1 }
+Write-Host "JDK $javaMajor — OK"
 
 if (-not ($env:ANDROID_HOME -or $env:ANDROID_SDK_ROOT)) {
   Write-Error "ANDROID_HOME не задан. Установите Android Studio / SDK и укажите путь."

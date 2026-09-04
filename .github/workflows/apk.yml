@@ -5,7 +5,8 @@
 #   • тег v*.*.*          → подписанный release-APK (нужны секреты, см. README)
 #   • ручной запуск       → debug-APK
 #
-# Среда: Node 22, JDK 17 (Temurin), Android SDK.
+# Среда: Node 22, JDK 21 (Temurin — обязателен для Capacitor 7: его
+# capacitor-android собирается с sourceCompatibility 21), Android SDK.
 name: Сборка APK
 
 on:
@@ -53,7 +54,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
       - name: Зависимости и Capacitor
@@ -72,7 +73,7 @@ jobs:
             npx cap sync android
           fi
       - name: Сборка debug-APK
-        run: cd android && ./gradlew assembleDebug
+        run: cd android && ./gradlew assembleDebug --no-daemon
       - name: Публикация APK
         uses: actions/upload-artifact@v4
         with:
@@ -95,7 +96,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
       - name: Зависимости и Capacitor
