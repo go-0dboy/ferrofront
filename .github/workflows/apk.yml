@@ -1,0 +1,134 @@
+# ФЕРРОФРОНТ — конвейер сборки APK из Git.
+#
+# Триггеры:
+#   • push в main/master  → debug-APK (артефакт вкладки Actions)
+#   • тег v*.*.*          → подписанный release-APK (нужны секреты, см. README)
+#   • ручной запуск       → debug-APK
+#
+# Среда: Node 22, JDK 17 (Temurin), Android SDK.
+name: Сборка APK
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch: {}
+
+jobs:
+  # ── sanity-сборка веба на Node 22 ──────────────────────────────────────────
+  web:
+    name: Веб-сборка (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Зависимости
+        run: npm ci
+      - name: Сборка
+        run: npm run build
+      - name: Capacitor-пакеты (страховка, если их нет в lock-файле)
+        run: |
+          node -e "require.resolve('@capacitor/cli')" 2>/dev/null || npm i --no-save @capacitor/cli @capacitor/android
+          node -e "require.resolve('@capacitor/core')" 2>/dev/null || npm i --no-save @capacitor/core
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: dist
+          retention-days: 7
+
+  # ── Android debug-APK ──────────────────────────────────────────────────────
+  apk-debug:
+    name: Android APK (debug)
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Зависимости и Capacitor
+        run: |
+          npm ci
+          node -e "require.resolve('@capacitor/cli')" 2>/dev/null || npm i --no-save @capacitor/cli @capacitor/android
+          node -e "require.resolve('@capacitor/core')" 2>/dev/null || npm i --no-save @capacitor/core
+      - name: Веб-сборка
+        run: npm run build
+      - name: Генерация/синхронизация Android-проекта
+        run: |
+          if [ -d android ]; then
+            npx cap sync android
+          else
+            npx cap add android
+            npx cap sync android
+          fi
+      - name: Сборка debug-APK
+        run: cd android && ./gradlew assembleDebug
+      - name: Публикация APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferrofront-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+  # ── подписанный release-APK по тегам ───────────────────────────────────────
+  apk-release:
+    name: Android APK (release, подпись)
+    runs-on: ubuntu-latest
+    needs: web
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Зависимости и Capacitor
+        run: |
+          npm ci
+          node -e "require.resolve('@capacitor/cli')" 2>/dev/null || npm i --no-save @capacitor/cli @capacitor/android
+          node -e "require.resolve('@capacitor/core')" 2>/dev/null || npm i --no-save @capacitor/core
+      - name: Веб-сборка
+        run: npm run build
+      - name: Генерация/синхронизация Android-проекта
+        run: |
+          if [ -d android ]; then npx cap sync android; else npx cap add android && npx cap sync android; fi
+      - name: Ключ подписи из секретов
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Секрет ANDROID_KEYSTORE_BASE64 не задан — release-подпись невозможна."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/ferrofront.keystore
+      - name: Инжекция signing-конфига в build.gradle
+        run: node scripts/apply-signing.cjs
+      - name: Сборка release-APK
+        env:
+          FERRO_KEYSTORE: ferrofront.keystore
+          FERRO_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          FERRO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          FERRO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: cd android && ./gradlew assembleRelease
+      - name: Публикация подписанного APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferrofront-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30

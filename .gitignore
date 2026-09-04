@@ -36,3 +36,12 @@ coverage/
 *.tsbuildinfo
 .next/
 build/
+
+# Android (Capacitor) — генерируемые артефакты, не сам проект
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+android/local.properties
+android/app/ferrofront.keystore
+dist-apk/
