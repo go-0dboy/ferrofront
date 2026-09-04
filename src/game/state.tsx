@@ -3,8 +3,8 @@ import type { FactionId, GameState, ResKey, Robot, ChatMsg } from './types';
 import {
   generateWorld, FACTIONS, STARTER_INV, rateFor, lootFor, uid, todayStr, incomeCapMult, prodSpeed, prodSlots,
   RESEARCH_MAP, researchSpeed, MODULES, moduleCost, maxRobots, repairSlots, repairCostMult, repairSpeedMult,
-  baseDefense, DAILY_POOL, WALK_MILESTONES, OPS_CHAIN, ACHIEVEMENTS, PART_MAP, RECIPES, revealRadius,
-  neighborIds, CHAT_POOL, ALLIANCE_MEMBERS, xpForLevel, terrAt,
+  baseDefense, DAILY_POOL, WEEKLY_POOL, WALK_MILESTONES, OPS_CHAIN, ACHIEVEMENTS, PART_MAP, RECIPES, revealRadius,
+  neighborIds, CHAT_POOL, ALLIANCE_MEMBERS, xpForLevel, terrAt, weekStr, ATTACK_ENERGY_COST, DEPLOY_ENERGY_MAX,
 } from './data';
 import type { Territory } from './types';
 
@@ -36,12 +36,15 @@ function freshState(name: string, faction: FactionId): GameState {
     profile: { name, faction, level: 1, xp: 0, engXp: 0, engLevel: 1 },
     credits: 500,
     res: { metal: 150, polymer: 100, electronics: 60, energy: 50, alloy: 0, core: 0 },
+    deployEnergy: DEPLOY_ENERGY_MAX,
     pos: { x: home.x, y: home.y }, heading: 0,
-    terrs, robots: [], inv: { ...STARTER_INV },
+    terrs, robots: [], squads: [], inv: { ...STARTER_INV },
     prod: [], research: null, researched: [],
     base: { hexId: home.id, modules: { hq: 1, garage: 1, storage: 1, generator: 1, turrets: 1, radar: 1, lab: 1, workshop: 1, shieldgen: 1 }, shieldUntil: now + 6 * 3600e3, repairs: [], upgrades: [] },
     events: [],
     daily: { date: todayStr(), counters: {}, claimed: [] },
+    weekly: { week: weekStr(), counters: {}, claimed: [] },
+    maxCluster: 2,
     ops: { step: 0, done: false, claimed: [] },
     stats: { walkM: 0, steps: 0, wins: 0, losses: 0, captures: 0, kills: 0, crafted: 0, built: 0, incomeCollected: 0, discovered: disc, dailyWalk: 0, dailySteps: 0, dailyCaptures: 0, dailyWins: 0, dailyCraft: 0, dailyIncome: 0, dailyDisc: 0, dailyRepair: 0, dailyAbilities: 0, dailyReinforce: 0, defended: 0, eventsDone: 0, reinforced: 0, baseUp2: 0, outpostCaptured: 0, researchDone: 0, creditsPeak: 500, upgradesDone: 0, landmarks: 0 },
     onboard: { done: false, dismissed: false },
@@ -101,6 +104,34 @@ const grant = (s: GameState, r: { credits?: number; res?: Partial<Record<ResKey,
   if (r.part) s.inv[r.part] = (s.inv[r.part] ?? 0) + 1;
 };
 const isNight = () => { const h = new Date().getHours(); return h >= 23 || h < 7; };
+/** размер крупнейшего связного кластера зон фракции */
+const largestCluster = (s: GameState, f: FactionId): number => {
+  const own = new Set(s.terrs.filter((t) => t.owner === f).map((t) => t.id));
+  const byKey = new Map(s.terrs.map((t) => [t.id, t]));
+  const seen = new Set<string>();
+  let best = 0;
+  const dirs = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+  for (const start of own) {
+    if (seen.has(start)) continue;
+    let size = 0;
+    const stack = [start];
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id); size++;
+      const t = byKey.get(id);
+      if (!t) continue;
+      for (const [dq, dr] of dirs) {
+        const nk = `${t.q + dq},${t.r + dr}`;
+        if (own.has(nk) && !seen.has(nk)) stack.push(nk);
+      }
+    }
+    best = Math.max(best, size);
+  }
+  return best;
+};
+/** бонус производства за связную сеть территорий */
+export const networkBonus = (cluster: number) => (cluster >= 10 ? 0.15 : cluster >= 5 ? 0.1 : cluster >= 3 ? 0.05 : 0);
 
 function reducer(state: GameState, a: Action): GameState {
   const s: GameState & { _toasts?: Toast[] } = structuredClone(state);
@@ -113,11 +144,12 @@ function reducer(state: GameState, a: Action): GameState {
       s.now = now; s.lastTick = now;
       // доход территорий
       const capMult = incomeCapMult(s);
+      const netBonus = 1 + networkBonus(s.maxCluster);
       for (const t of s.terrs) {
         if (t.owner !== s.profile.faction) continue;
         const r = rateFor(t);
-        let bonus = 1;
-        if (t.type === 'strategic') bonus = 1;
+        let bonus = netBonus;
+        if (t.type === 'strategic') bonus = netBonus;
         for (const n of neighborIds(t, s.terrs)) if (n.owner === s.profile.faction && n.type === 'strategic') bonus += 0.15;
         const cap = r.credits * 45 * capMult;
         t.unclaimed = Math.min(cap, t.unclaimed + r.credits * bonus * (dt / 60));
@@ -133,11 +165,15 @@ function reducer(state: GameState, a: Action): GameState {
           void rc; void key;
         }
       }
+      // энергия развёртывания: базовая regen + бонус от энергоподстанций
+      const eZones = s.terrs.filter((t) => t.owner === s.profile.faction && t.type === 'energy').length;
+      s.deployEnergy = Math.min(DEPLOY_ENERGY_MAX, s.deployEnergy + (dt / 22) * (1 + 0.35 * eZones));
       // производство
       s.prod = s.prod.filter((j) => {
         if (j.startedAt + j.duration <= now) {
           s.inv[j.partId] = (s.inv[j.partId] ?? 0) + 1;
           inc(s, 'crafted', 'dailyCraft');
+          s.weekly.counters.weekCraft = (s.weekly.counters.weekCraft ?? 0) + 1;
           addEngXp(s, 12); addXp(s, 15);
           pushLog(s, 'econ', `Завод изготовил: ${PART_MAP[j.partId]?.name ?? j.partId}.`);
           if (s.settings.notifProd) qToast(s, 'Производство завершено', 'ok', PART_MAP[j.partId]?.name);
@@ -169,6 +205,7 @@ function reducer(state: GameState, a: Action): GameState {
         if (u.startedAt + u.duration <= now) {
           s.base.modules[u.moduleId] = (s.base.modules[u.moduleId] ?? 1) + 1;
           inc(s, 'upgradesDone', null);
+          s.weekly.counters.weekUpgrades = (s.weekly.counters.weekUpgrades ?? 0) + 1;
           if (s.base.modules[u.moduleId] >= 2) s.stats.baseUp2 = 1;
           pushLog(s, 'econ', `Модуль базы улучшен: ${MODULES.find((m) => m.id === u.moduleId)?.name} → ур. ${s.base.modules[u.moduleId]}.`);
           if (s.settings.notifProd) qToast(s, 'Строительство завершено', 'ok', MODULES.find((m) => m.id === u.moduleId)?.name);
@@ -252,6 +289,13 @@ function reducer(state: GameState, a: Action): GameState {
         s.daily = { date: today, counters: {}, claimed: [] };
         if (s.settings.notifDaily) qToast(s, 'Новые ежедневные задания', 'info', 'Раздел «Задания»');
       }
+      // сброс недели
+      const wk = weekStr();
+      if (s.weekly.week !== wk) s.weekly = { week: wk, counters: {}, claimed: [] };
+      // пересчёт сети территорий (редко)
+      if (s.profile.faction && (Math.floor(now / 15000) !== Math.floor((now - dt * 1000) / 15000) || s.maxCluster === 0)) {
+        s.maxCluster = largestCluster(s, s.profile.faction);
+      }
       s.stats.creditsPeak = Math.max(s.stats.creditsPeak ?? 0, s.credits);
       // достижения
       for (const ach of ACHIEVEMENTS) {
@@ -272,9 +316,10 @@ function reducer(state: GameState, a: Action): GameState {
         const steps = Math.round(dm / 0.75);
         s.stats.walkM = (s.stats.walkM ?? 0) + dm;
         s.stats.steps = (s.stats.steps ?? 0) + steps;
-        inc(s, 'dailyWalk', null, 0);
         s.stats.dailyWalk = (s.stats.dailyWalk ?? 0) + dm;
         s.stats.dailySteps = (s.stats.dailySteps ?? 0) + steps;
+        s.weekly.counters.weekWalk = (s.weekly.counters.weekWalk ?? 0) + dm;
+        s.deployEnergy = Math.min(DEPLOY_ENERGY_MAX, s.deployEnergy + dm * 0.0035);
       }
       const rr = revealRadius(s);
       for (const t of s.terrs) {
@@ -331,12 +376,16 @@ function reducer(state: GameState, a: Action): GameState {
         s.events = s.events.filter((e) => e.hexId !== t.id);
         inc(s, 'captures', 'dailyCaptures');
         inc(s, 'wins', 'dailyWins');
+        s.weekly.counters.weekCaptures = (s.weekly.counters.weekCaptures ?? 0) + 1;
+        s.weekly.counters.weekWins = (s.weekly.counters.weekWins ?? 0) + 1;
+        s.deployEnergy = Math.max(0, s.deployEnergy - ATTACK_ENERGY_COST);
         if (t.type === 'outpost') s.stats.outpostCaptured = 1;
         s.alliance.contrib += 8;
         pushLog(s, 'combat', `Зона «${t.name}» захвачена. Добыча: ${loot.credits} кр.`);
         if (s.settings.notifCombat) qToast(s, 'ПОБЕДА — зона захвачена', 'combat', `«${t.name}» +${loot.credits} кр.`);
       } else {
         inc(s, 'losses', null);
+        s.deployEnergy = Math.max(0, s.deployEnergy - ATTACK_ENERGY_COST);
         if (win === false) pushLog(s, 'combat', `Атака на «${t?.name}» отбита противником.`);
       }
       return s;
@@ -385,9 +434,36 @@ function reducer(state: GameState, a: Action): GameState {
         qToast(s, 'Обломки собраны', 'ok', `+120 кр., +1 ${PART_MAP[p].name}`);
       }
       inc(s, 'eventsDone', null);
+      s.weekly.counters.weekEvents = (s.weekly.counters.weekEvents ?? 0) + 1;
       if (t) t.eventId = null;
       s.events = s.events.filter((x) => x.id !== e.id);
       pushLog(s, 'econ', `Событие завершено: ${t?.name}.`);
+      return s;
+    }
+
+    case 'CLAIM_WEEKLY_MISSION': {
+      const id = a.id as string;
+      const def = WEEKLY_POOL.find((m) => m.id === id);
+      if (!def || s.weekly.claimed.includes(id)) return state;
+      if ((s.weekly.counters[def.metric] ?? 0) < def.target) return state;
+      s.weekly.claimed.push(id);
+      grant(s, def.reward);
+      qToast(s, 'Недельная цель выполнена', 'ok', def.title);
+      return s;
+    }
+
+    case 'SAVE_SQUAD': {
+      const ids = a.ids as string[];
+      if (!ids.length) return state;
+      if (s.squads.length >= 3) { qToast(s, 'Максимум 3 сохранённых отряда', 'warn'); return s; }
+      const name = (a.name as string) || `Отряд ${s.squads.length + 1}`;
+      s.squads = [...s.squads, { id: uid(), name, ids }];
+      qToast(s, 'Отряд сохранён', 'ok', name);
+      return s;
+    }
+
+    case 'DELETE_SQUAD': {
+      s.squads = s.squads.filter((q) => q.id !== a.id);
       return s;
     }
 
@@ -567,6 +643,11 @@ function load(): GameState | null {
     if (!raw) return null;
     const s = JSON.parse(raw) as GameState;
     if (s.v !== 2 || !s.terrs?.length) return null;
+    // миграция старых сохранений
+    if (typeof s.deployEnergy !== 'number') s.deployEnergy = DEPLOY_ENERGY_MAX;
+    if (!Array.isArray(s.squads)) s.squads = [];
+    if (!s.weekly) s.weekly = { week: weekStr(), counters: {}, claimed: [] };
+    if (typeof s.maxCluster !== 'number') s.maxCluster = 0;
     return s;
   } catch { return null; }
 }

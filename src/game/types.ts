@@ -39,6 +39,8 @@ export interface ChatMsg { id: string; author: string; self?: boolean; text: str
 export interface LogEntry { id: string; at: number; kind: 'info' | 'combat' | 'econ' | 'alert'; text: string; }
 
 export interface DailyState { date: string; counters: Record<string, number>; claimed: string[]; }
+export interface WeeklyState { week: string; counters: Record<string, number>; claimed: string[]; }
+export interface SquadPreset { id: string; name: string; ids: string[]; }
 
 export interface MissionDef {
   id: string; title: string; metric: string; target: number;
@@ -64,9 +66,11 @@ export interface GameState {
   v: number; startedAt: number; now: number; lastTick: number;
   profile: { name: string; faction: FactionId | null; level: number; xp: number; engXp: number; engLevel: number };
   credits: number; res: Record<ResKey, number>;
+  deployEnergy: number;
   pos: { x: number; y: number }; heading: number;
   terrs: Territory[];
   robots: Robot[];
+  squads: SquadPreset[];
   inv: Record<string, number>;
   prod: ProdJob[];
   research: { id: string; startedAt: number; duration: number } | null;
@@ -74,6 +78,8 @@ export interface GameState {
   base: { hexId: string | null; modules: Record<string, number>; shieldUntil: number; repairs: RepairJob[]; upgrades: ModuleJob[] };
   events: GameEvent[];
   daily: DailyState;
+  weekly: WeeklyState;
+  maxCluster: number;
   ops: { step: number; done: boolean; claimed: number[] };
   stats: Record<string, number>;
   onboard: { done: boolean; dismissed: boolean };

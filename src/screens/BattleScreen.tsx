@@ -280,6 +280,35 @@ export default function BattleScreen({ hexId, onClose }: { hexId: string; onClos
               </button>
             );
           })}
+          {state.robots.length > 0 && (
+            <div className="panel chamfer-sm p-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="hud-label">Сохранённые отряды</span>
+                <button className="text-[9px] font-mono text-acc border border-acc/40 chamfer-xs px-2 py-1 disabled:opacity-40" disabled={picked.length === 0 || state.squads.length >= 3}
+                  onClick={() => dispatch({ type: 'SAVE_SQUAD', ids: picked, name: `Отряд ${state.squads.length + 1}` })}>
+                  + СОХРАНИТЬ ТЕКУЩИЙ
+                </button>
+              </div>
+              {state.squads.length === 0 ? (
+                <p className="text-[10px] text-faint">Выберите машины и сохраните состав: разведка, штурм, оборона — под разные цели.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {state.squads.map((q) => {
+                    const valid = q.ids.filter((id) => state.robots.some((r) => r.id === id && r.condition >= 30));
+                    return (
+                      <span key={q.id} className="chamfer-xs bg-bg2 border border-line flex items-center">
+                        <button className="px-2.5 py-1.5 text-[10px] font-bold text-dim disabled:opacity-40" disabled={valid.length === 0}
+                          onClick={() => setPicked(valid.slice(0, 3))}>
+                          {q.name} · {valid.length}
+                        </button>
+                        <button className="px-1.5 py-1.5 text-faint" onClick={() => dispatch({ type: 'DELETE_SQUAD', id: q.id })}>×</button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <button className="btn-warn chamfer w-full py-4 text-base tracking-widest" disabled={picked.length === 0} onClick={startFight}>
             В БОЙ
           </button>

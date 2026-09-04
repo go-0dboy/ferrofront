@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useGame, dailyMissions } from '../game/state';
-import { WALK_MILESTONES, OPS_CHAIN, fmt, RES_META } from '../game/data';
+import { WALK_MILESTONES, WEEKLY_POOL, OPS_CHAIN, fmt, fmtDur, RES_META, weekEndsIn } from '../game/data';
 import type { ResKey } from '../game/types';
 import { Icon, Bar } from '../components/ui';
 
@@ -14,7 +14,7 @@ function Reward({ r }: { r: { credits?: number; res?: Partial<Record<ResKey, num
 
 export default function MissionsScreen() {
   const { state, dispatch } = useGame();
-  const [tab, setTab] = useState<'daily' | 'ops' | 'walk'>('daily');
+  const [tab, setTab] = useState<'daily' | 'weekly' | 'ops' | 'walk'>('daily');
   const dailies = dailyMissions(state);
   const ops = state.ops.done ? null : OPS_CHAIN[state.ops.step];
   const opsVal = ops ? Math.min(ops.target, state.stats[ops.metric] ?? 0) : 0;
@@ -24,10 +24,48 @@ export default function MissionsScreen() {
     <div className="absolute inset-0 overflow-y-auto no-scrollbar grid-bg">
       <div className="p-3 space-y-3 pb-8">
         <div className="flex gap-1.5">
-          {([['daily', 'Ежедневные'], ['ops', 'Операция'], ['walk', 'Походы']] as const).map(([id, name]) => (
+          {([['daily', 'День'], ['weekly', 'Неделя'], ['ops', 'Операция'], ['walk', 'Походы']] as const).map(([id, name]) => (
             <button key={id} onClick={() => setTab(id)} className={`chamfer-sm px-3 py-2 text-[11px] font-bold flex-1 ${tab === id ? 'btn-acc' : 'btn-ghost'}`}>{name}</button>
           ))}
         </div>
+
+        {tab === 'weekly' && (
+          <div className="space-y-2">
+            <div className="panel chamfer scanlines relative p-3 border-l-2 border-l-acc">
+              <div className="flex items-center justify-between">
+                <span className="hud-label !text-acc">Недельные цели сектора</span>
+                <span className="text-[10px] font-mono text-dim">сброс через {fmtDur(weekEndsIn() / 1000)}</span>
+              </div>
+              <p className="text-[10px] text-dim mt-1 leading-snug">Крупные награды за устойчивую игру: редкие материалы и кредиты. Выполнять всё не обязательно.</p>
+            </div>
+            {WEEKLY_POOL.map((m) => {
+              const val = Math.min(m.target, state.weekly.counters[m.metric] ?? 0);
+              const claimed = state.weekly.claimed.includes(m.id);
+              const done = val >= m.target;
+              return (
+                <div key={m.id} className={`panel chamfer-sm p-3 ${claimed ? 'opacity-55' : ''}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-8 h-8 shrink-0 chamfer-xs border flex items-center justify-center ${done ? 'border-acc/60 text-acc bg-acc/10' : 'border-line text-faint bg-bg2'}`}>
+                      <Icon name={m.metric.includes('Walk') ? 'walk' : m.metric.includes('Wins') ? 'sword' : m.metric.includes('Captures') ? 'flag' : m.metric.includes('Craft') ? 'factory' : m.metric.includes('Upgrades') ? 'hq' : 'star'} size={15} />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] font-bold truncate">{m.title}</div>
+                      <Reward r={m.reward} />
+                    </div>
+                    <button className={`chamfer-xs px-3 py-2 text-[10px] font-bold ${claimed ? 'btn-ghost' : done ? 'btn-acc' : 'btn-ghost opacity-60'}`} disabled={!done || claimed}
+                      onClick={() => dispatch({ type: 'CLAIM_WEEKLY_MISSION', id: m.id })}>
+                      {claimed ? '✓' : 'ВЗЯТЬ'}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Bar value={val} max={m.target} h={5} color={done ? '#35e0c8' : '#4c9ef5'} className="flex-1" />
+                    <span className="font-mono text-[10px] text-dim w-20 text-right">{fmt(val)}/{fmt(m.target)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {tab === 'daily' && (
           <div className="space-y-2">

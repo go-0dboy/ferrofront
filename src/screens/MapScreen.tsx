@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGame, nearHex, canAttackNow } from '../game/state';
 import {
   generateWorld, WORLD, hexPath, terrAt, ownerColor, ownerName, rateFor, TYPE_LABEL, FACTIONS, RES_META,
-  revealRadius, fmt, fmtDur, RECIPES, FACTORIES, PART_MAP, prodSlots, hexRing,
+  revealRadius, fmt, fmtDur, RECIPES, FACTORIES, PART_MAP, prodSlots, hexRing, ATTACK_ENERGY_COST,
 } from '../game/data';
 import type { Territory, ResKey } from '../game/types';
 import { Icon, Sheet, Bar } from '../components/ui';
@@ -336,8 +336,14 @@ export default function MapScreen({ onAttack }: { onAttack: (hexId: string) => v
     }
     if (best.eventId === 'anomaly' || best.eventId === 'wreck') return { hex: best, kind: 'scan' as const, label: best.eventId === 'anomaly' ? 'Сканировать аномалию' : 'Собрать обломки' };
     if (best.type === 'landmark') return { hex: best, kind: 'landmark' as const, label: 'Исследовать' };
-    if (canAttackNow(best) && state.robots.some((r) => r.condition >= 30)) return { hex: best, kind: 'attack' as const, label: 'Атаковать' };
-    return { hex: best, kind: 'info' as const, label: canAttackNow(best) ? 'Нужен мех (≥30%)' : `Перезарядка ${fmtDur(((best.attackReadyAt ?? 0) - Date.now()) / 1000)}` };
+    if (canAttackNow(best) && state.robots.some((r) => r.condition >= 30) && state.deployEnergy >= ATTACK_ENERGY_COST)
+      return { hex: best, kind: 'attack' as const, label: `Атаковать · ${ATTACK_ENERGY_COST}⚡` };
+    return {
+      hex: best, kind: 'info' as const,
+      label: !canAttackNow(best) ? `Перезарядка ${fmtDur(((best.attackReadyAt ?? 0) - Date.now()) / 1000)}`
+        : state.deployEnergy < ATTACK_ENERGY_COST ? `Нужно ${ATTACK_ENERGY_COST}⚡ энергии`
+        : 'Нужен мех (≥30%)',
+    };
   }, [state]);
 
   const doAction = () => {
@@ -512,11 +518,15 @@ function TerrCard({ t, state, dispatch, onAttack, close }: {
       )}
       {!isOwn && t.type !== 'water' && (
         <div className="space-y-1.5">
-          <button className="btn-warn chamfer w-full py-3.5 text-sm flex items-center justify-center gap-2" disabled={!near || !ready} onClick={() => { onAttack(t.id); close(); }}>
+          <button className="btn-warn chamfer w-full py-3.5 text-sm flex items-center justify-center gap-2" disabled={!near || !ready || state.deployEnergy < ATTACK_ENERGY_COST} onClick={() => { onAttack(t.id); close(); }}>
             <Icon name="sword" size={18} />
-            {!near ? 'Подойдите ближе (165 м)' : !ready ? `Перезарядка ${fmtDur(((t.attackReadyAt ?? 0) - Date.now()) / 1000)}` : 'НАЧАТЬ ШТУРМ'}
+            {!near ? 'Подойдите ближе (165 м)'
+              : !ready ? `Перезарядка ${fmtDur(((t.attackReadyAt ?? 0) - Date.now()) / 1000)}`
+              : state.deployEnergy < ATTACK_ENERGY_COST ? `Нужно ${ATTACK_ENERGY_COST}⚡ — копится со временем и ходьбой`
+              : `НАЧАТЬ ШТУРМ · ${ATTACK_ENERGY_COST}⚡`}
           </button>
           {!near && <p className="text-[10px] text-dim text-center">До центра зоны {fmt(Math.hypot(t.x - state.pos.x, t.y - state.pos.y))} м</p>}
+          {near && state.deployEnergy < ATTACK_ENERGY_COST && <p className="text-[10px] text-amb text-center">Энергия развёртывания восстанавливается: +1 каждые ~22 с, ходьба ускоряет заряд</p>}
         </div>
       )}
       {isOwn && t.type !== 'water' && (

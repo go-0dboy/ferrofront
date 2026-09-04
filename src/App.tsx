@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { GameProvider, useGame } from './game/state';
-import { FACTIONS, fmt, fmtDur, xpForLevel, RES_META } from './game/data';
+import { FACTIONS, fmt, fmtDur, xpForLevel, RES_META, DEPLOY_ENERGY_MAX } from './game/data';
 import type { FactionId, ResKey } from './game/types';
 import { Icon, ResChip, Sheet, Bar } from './components/ui';
 import MapScreen from './screens/MapScreen';
@@ -122,12 +122,37 @@ function OnboardCard({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   );
 }
 
+function Splash({ done }: { done: boolean }) {
+  return (
+    <div className={`absolute inset-0 z-50 bg-bg0 flex flex-col items-center justify-center transition-opacity duration-500 ${done ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+      <div className="grid-bg absolute inset-0 opacity-40" />
+      <svg width="84" height="84" viewBox="0 0 48 48" className="anim-float relative">
+        <path d="M24 3 42 13.5v21L24 45 6 34.5v-21L24 3z" fill="none" stroke="#35e0c8" strokeWidth="2" strokeDasharray="4 3" style={{ animation: 'dashMove 1.2s linear infinite' }} />
+        <path d="M26 12 17 26h6l-2 10 10-15h-6l1-9z" fill="#f2a93b" />
+      </svg>
+      <div className="font-[family-name:var(--font-disp)] text-2xl tracking-[0.2em] mt-3 relative">ФЕРРОФРОНТ</div>
+      <div className="hud-label mt-1 relative">тактическая сеть · сектор Крайск-7</div>
+      <div className="w-44 h-1 bg-bg3 mt-5 relative overflow-hidden">
+        <div className="absolute inset-y-0 left-0 bg-acc" style={{ animation: 'bootbar 1.3s ease-in-out forwards' }} />
+      </div>
+      <div className="text-[9px] font-mono text-faint mt-2 relative blink">подключение к командной сети…</div>
+      <style>{`@keyframes bootbar { from { width: 0 } to { width: 100% } }`}</style>
+    </div>
+  );
+}
+
 function Shell() {
   const { state, dispatch } = useGame();
   const [tab, setTab] = useState<Tab>('map');
   const [battleHex, setBattleHex] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(false);
+  const [boot, setBoot] = useState(true);
   const gpsPrev = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setBoot(false), 1500);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     if (!state.settings.gps || typeof navigator === 'undefined' || !navigator.geolocation) return;
@@ -155,6 +180,7 @@ function Shell() {
       <div className="h-full relative">
         <CreateScreen />
         <ToastHost />
+        <Splash done={!boot} />
       </div>
     );
   }
@@ -170,12 +196,21 @@ function Shell() {
           <span className="w-8 h-8 shrink-0 chamfer-xs flex items-center justify-center font-[family-name:var(--font-disp)] text-[13px]" style={{ background: f.soft, border: `1px solid ${f.color}`, color: f.color }}>
             {f.short.slice(0, 2)}
           </span>
-          <div className="w-20 shrink-0">
-            <div className="flex justify-between text-[9px] font-mono leading-none mb-0.5">
-              <span className="text-acc font-bold">УР.{state.profile.level}</span>
-              <span className="text-faint">{Math.round((state.profile.xp / xpForLevel(state.profile.level)) * 100)}%</span>
+          <div className="w-24 shrink-0 space-y-1">
+            <div>
+              <div className="flex justify-between text-[9px] font-mono leading-none mb-0.5">
+                <span className="text-acc font-bold">УР.{state.profile.level}</span>
+                <span className="text-faint">{Math.round((state.profile.xp / xpForLevel(state.profile.level)) * 100)}%</span>
+              </div>
+              <Bar value={state.profile.xp} max={xpForLevel(state.profile.level)} h={4} color="#35e0c8" />
             </div>
-            <Bar value={state.profile.xp} max={xpForLevel(state.profile.level)} h={4} color="#35e0c8" />
+            <div>
+              <div className="flex justify-between text-[8px] font-mono leading-none mb-0.5">
+                <span className="text-amb font-bold flex items-center gap-0.5"><Icon name="bolt" size={8} />РАЗВЁРТ.</span>
+                <span className="text-faint">{Math.round(state.deployEnergy)}</span>
+              </div>
+              <Bar value={state.deployEnergy} max={DEPLOY_ENERGY_MAX} h={4} color="#f2a93b" />
+            </div>
           </div>
           <div className="flex-1 flex gap-1 overflow-x-auto no-scrollbar items-center">
             {resKeys.map((k) => (
@@ -238,6 +273,7 @@ function Shell() {
         </div>
       </Sheet>
       <ToastHost />
+      <Splash done={!boot} />
     </div>
   );
 }

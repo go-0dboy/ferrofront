@@ -45,6 +45,29 @@ export class BattleSim {
 
   alive(side: 0 | 1) { return this.units.filter((u) => !u.dead && u.side === side); }
 
+  /** перекрывает ли укрытие прямую видимость между точками */
+  losBlocked(x1: number, y1: number, x2: number, y2: number): boolean {
+    for (const o of this.obstacles) {
+      const minX = o.x, maxX = o.x + o.w, minY = o.y, maxY = o.y + o.h;
+      let tmin = 0, tmax = 1;
+      const dx = x2 - x1, dy = y2 - y1;
+      const axes: [number, number, number, number][] = [[x1, dx, minX, maxX], [y1, dy, minY, maxY]];
+      let hit = true;
+      for (const [p, d, lo, hi] of axes) {
+        if (Math.abs(d) < 1e-9) {
+          if (p < lo || p > hi) { hit = false; break; }
+        } else {
+          let t1 = (lo - p) / d, t2 = (hi - p) / d;
+          if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+          tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+          if (tmin > tmax) { hit = false; break; }
+        }
+      }
+      if (hit && tmin < 0.98 && tmax > 0.02) return true;
+    }
+    return false;
+  }
+
   setFocus(id: string | null) { this.focusId = id; }
 
   tryAbility(kind: 'barrage' | 'repair' | 'overdrive'): boolean {
@@ -167,11 +190,12 @@ export class BattleSim {
       if (dist <= u.range && u.cd <= 0 && u.rof > 0) {
         u.cd = 1 / u.rof;
         const falloff = 1 - Math.max(0, (dist - u.range * 0.55) / (u.range * 0.9)) * 0.45;
-        const hitChance = Math.min(0.95, Math.max(0.35, (u.acc / 100) * falloff));
+        const blocked = this.losBlocked(u.x, u.y, t.x, t.y);
+        const hitChance = Math.min(0.95, Math.max(0.35, (u.acc / 100) * falloff)) * (blocked ? 0.55 : 1);
         this.addFx({ kind: 'muzzle', x: u.x, y: u.y - 8, dur: 0.09, color: u.color });
-        this.addFx({ kind: 'shot', x: u.x, y: u.y - 8, x2: t.x + (rnd() * 24 - 12), y2: t.y + (rnd() * 24 - 12), dur: 0.12, color: u.color });
+        this.addFx({ kind: 'shot', x: u.x, y: u.y - 8, x2: t.x + (rnd() * 24 - 12), y2: t.y + (rnd() * 24 - 12), dur: 0.12, color: blocked ? '#8fa3bc' : u.color });
         if (rnd() < hitChance) {
-          this.damage(t, u.dmg * (0.85 + rnd() * 0.3), u);
+          this.damage(t, u.dmg * (0.85 + rnd() * 0.3) * (blocked ? 0.6 : 1), u);
           if (u.aoe > 0) {
             this.addFx({ kind: 'boom', x: t.x, y: t.y, dur: 0.45, color: '#f2a93b', size: u.aoe });
             for (const f of this.alive(t.side)) {
@@ -198,6 +222,18 @@ export class BattleSim {
     const step = u.speed * dt;
     u.x += ((tx - u.x) / d) * Math.min(step, d);
     u.y += ((ty - u.y) / d) * Math.min(step, d);
+    // выталкивание из укрытий
+    const r = 20;
+    for (const o of this.obstacles) {
+      const cx = Math.max(o.x, Math.min(u.x, o.x + o.w));
+      const cy = Math.max(o.y, Math.min(u.y, o.y + o.h));
+      const dx = u.x - cx, dy = u.y - cy;
+      const dd = Math.hypot(dx, dy);
+      if (dd < r) {
+        if (dd < 0.001) { u.y = o.y - r; continue; }
+        u.x = cx + (dx / dd) * r; u.y = cy + (dy / dd) * r;
+      }
+    }
     u.x = Math.max(30, Math.min(ARENA.w - 30, u.x));
     u.y = Math.max(40, Math.min(ARENA.h - 40, u.y));
   }

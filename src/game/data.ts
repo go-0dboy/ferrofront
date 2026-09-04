@@ -23,6 +23,20 @@ export function fmtDur(s: number) {
   return `${Math.floor(s / 3600)}ч ${Math.floor((s % 3600) / 60)}м`;
 }
 export const todayStr = () => new Date().toISOString().slice(0, 10);
+export function weekStr(): string {
+  const d = new Date();
+  const onejan = new Date(d.getFullYear(), 0, 1);
+  const week = Math.ceil(((d.getTime() - onejan.getTime()) / 86400000 + onejan.getDay() + 1) / 7);
+  return `${d.getFullYear()}-W${week}`;
+}
+export function weekEndsIn(): number {
+  const now = new Date();
+  const day = (now.getDay() + 6) % 7; // 0 = понедельник
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + 7, 0, 0, 0);
+  return Math.max(0, end.getTime() - now.getTime());
+}
+export const ATTACK_ENERGY_COST = 25;
+export const DEPLOY_ENERGY_MAX = 100;
 
 /* ---------- фракции ---------- */
 export const FACTIONS: Record<FactionId, Faction> = {
@@ -211,6 +225,14 @@ export const DAILY_POOL: MissionDef[] = [
   { id: 'd_repair1', title: 'Отремонтировать меха', metric: 'dailyRepair', target: 1, reward: { credits: 80, res: { metal: 20 } } },
   { id: 'd_ability2', title: 'Применить 2 боевые системы', metric: 'dailyAbilities', target: 2, reward: { credits: 80, xp: 25 } },
   { id: 'd_reinf1', title: 'Укрепить территорию', metric: 'dailyReinforce', target: 1, reward: { credits: 100, res: { metal: 30 } } },
+];
+export const WEEKLY_POOL: MissionDef[] = [
+  { id: 'w_walk15', title: 'Пройти 15 км за неделю', metric: 'weekWalk', target: 15000, reward: { credits: 1200, res: { alloy: 10 } } },
+  { id: 'w_wins10', title: 'Одержать 10 побед', metric: 'weekWins', target: 10, reward: { credits: 800, res: { energy: 60 } } },
+  { id: 'w_cap5', title: 'Захватить 5 зон', metric: 'weekCaptures', target: 5, reward: { credits: 900, res: { electronics: 120 } } },
+  { id: 'w_craft10', title: 'Изготовить 10 компонентов', metric: 'weekCraft', target: 10, reward: { credits: 700, res: { metal: 120, polymer: 120 } } },
+  { id: 'w_up2', title: 'Улучшить 2 модуля базы', metric: 'weekUpgrades', target: 2, reward: { credits: 500, res: { core: 1 } } },
+  { id: 'w_ev3', title: 'Завершить 3 события сектора', metric: 'weekEvents', target: 3, reward: { credits: 400, res: { energy: 50 } } },
 ];
 export const WALK_MILESTONES = [
   { id: 'w1', m: 1000, label: '1 км — первый патруль', reward: { credits: 60 } },
