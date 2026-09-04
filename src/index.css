@@ -107,6 +107,8 @@ body {
 @keyframes stripes { to { background-position: 24px 0; } }
 @keyframes glowPulse { 0%,100% { box-shadow: 0 0 0 1px rgba(53,224,200,.3), 0 0 18px -4px rgba(53,224,200,.35);} 50% { box-shadow: 0 0 0 1px rgba(53,224,200,.55), 0 0 26px -4px rgba(53,224,200,.6);} }
 @keyframes toastIn { from { transform: translateY(-16px) scale(.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+@keyframes sigPulse { 0%, 100% { transform: scaleY(.3); opacity: .5; } 50% { transform: scaleY(1); opacity: 1; } }
+.sig-bar { transform-origin: bottom; animation: sigPulse 1.1s ease-in-out infinite; }
 @keyframes dashMove { to { stroke-dashoffset: -20; } }
 @keyframes hoverBob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
 @keyframes rotor { to { transform: rotate(360deg); } }
