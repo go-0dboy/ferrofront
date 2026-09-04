@@ -11,7 +11,10 @@ Vite + Tailwind 4, игровой рендер — Canvas 2D, состояние
 
 ## Быстрый старт
 
+**Требования:** Node ≥ 22 (версия закреплена в `.nvmrc`: `nvm use`), npm 10+.
+
 ```bash
+nvm use            # переключиться на Node 22 по .nvmrc
 npm install
 npm run dev        # локальная разработка
 npm run build      # прод-сборка в dist/
@@ -36,7 +39,67 @@ git push -u origin main
 
 Предлагаемая история коммитов при декомпозиции: `core: карта и мир`,
 `feat: конструктор мехов`, `feat: бои`, `feat: экономика и заводы`,
-`feat: база и исследования`, `feat: сенсоры (GPS/акселерометр/компас)`, `feat: P2P WebRTC`.
+`feat: база и исследования`, `feat: сенсоры (GPS/акселерометр/компас)`,
+`feat: P2P WebRTC`, `ci: конвейер APK (Node 22 + Gradle)`.
+
+## 📱 Сборка APK (Android)
+
+Игра упаковывается в нативный Android-контейнер через **Capacitor**
+(веб-сборка → WebView → APK). Всё необходимое лежит в Git; Android-проект
+генерируется автоматически при первой сборке (и может быть закоммичен
+после генерации, если нужны ручные правки манифеста/иконок).
+
+### Локально
+
+Требования: **Node ≥ 22**, **JDK 17**, **Android SDK** (`ANDROID_HOME`,
+лицензии приняты: `sdkmanager --licenses`).
+
+```bash
+bash scripts/build-apk.sh        # Linux / macOS
+powershell -ExecutionPolicy Bypass -File scripts/build-apk.ps1   # Windows
+```
+
+Скрипт сам: проверит версию Node, подставит `@capacitor/cli`/`@capacitor/android`,
+если их нет в `package.json`, соберёт веб (`dist/`), сгенерирует/синхронизирует
+`android/` и соберёт APK через Gradle. Результат — `dist-apk/ferrofront-debug.apk`,
+установка: `adb install -r dist-apk/ferrofront-debug.apk`.
+
+Если пакетов Capacitor нет в lock-файле, добавьте их один раз:
+
+```bash
+npm i @capacitor/core && npm i -D @capacitor/cli @capacitor/android
+git add package.json package-lock.json && git commit -m "chore: capacitor toolchain"
+```
+
+### Из Git — GitHub Actions (`.github/workflows/apk.yml`)
+
+| Триггер | Результат |
+|---|---|
+| push в `main` / ручной запуск | **debug-APK** — артефакт вкладки Actions |
+| тег `v1.0.0` | **подписанный release-APK** |
+
+CI работает на Node 22 + JDK 17 (Temurin) + Android SDK; веб-сборка
+проверяется отдельной джобой. Для release-подписи добавьте секреты репозитория:
+
+```
+ANDROID_KEYSTORE_BASE64   base64 -i ferrofront.keystore | pbcopy
+ANDROID_STORE_PASSWORD    пароль хранилища
+ANDROID_KEY_ALIAS         алиас ключа
+ANDROID_KEY_PASSWORD      пароль ключа
+```
+
+Инжекцию signing-конфига в `android/app/build.gradle` выполняет
+`scripts/apply-signing.cjs` (идемпотентно, параметры — из окружения,
+в Git ключи не попадают; `.gitignore` блокирует keystore и `local.properties`).
+
+Ключ генерируется так:
+`keytool -genkeypair -v -keystore ferrofront.keystore -alias ferrofront -keyalg RSA -keysize 2048 -validity 10000`
+
+### Публикация
+
+Перед загрузкой в Google Play смените `appId` в `capacitor.config.ts`
+(сейчас `com.ferrofront.app`), добавьте иконки/сплэш (`npx cap sync`),
+соберите AAB: `cd android && ./gradlew bundleRelease`.
 
 ---
 
