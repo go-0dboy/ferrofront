@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameProvider, useGame } from './game/state';
-import { FACTIONS, fmt, fmtDur, xpForLevel, RES_META, DEPLOY_ENERGY_MAX } from './game/data';
+import { SensorsProvider } from './game/sensors';
+import { NetProvider, useNet } from './net/net';
+import { FACTIONS, fmt, fmtDur, xpForLevel, RES_META, DEPLOY_ENERGY_MAX, WORLD } from './game/data';
 import type { FactionId, ResKey } from './game/types';
 import { Icon, ResChip, Sheet, Bar } from './components/ui';
 import MapScreen from './screens/MapScreen';
@@ -141,39 +143,72 @@ function Splash({ done }: { done: boolean }) {
   );
 }
 
+/** провайдеры сессии: датчики + P2P, привязанные к игровому состоянию */
+function SessionProviders({ children }: { children: React.ReactNode }) {
+  const { state, dispatch } = useGame();
+  const stateRef = useRef(state); stateRef.current = state;
+  const gpsAnchor = useRef<{ lat: number; lon: number; x: number; y: number; lastLat: number; lastLon: number } | null>(null);
+
+  const onSteps = useCallback((count: number) => dispatch({ type: 'SENSOR_STEPS', count }), [dispatch]);
+  const onHeading = useCallback((deg: number) => dispatch({ type: 'SET_HEADING', deg }), [dispatch]);
+  const onGpsMove = useCallback((lat: number, lon: number) => {
+    const st = stateRef.current;
+    if (!gpsAnchor.current) {
+      gpsAnchor.current = { lat, lon, x: st.pos.x, y: st.pos.y, lastLat: lat, lastLon: lon };
+      return;
+    }
+    const a = gpsAnchor.current;
+    const cosL = Math.cos((lat * Math.PI) / 180);
+    const x = Math.max(50, Math.min(WORLD.w - 50, a.x + (lon - a.lon) * 111320 * cosL));
+    const y = Math.max(50, Math.min(WORLD.h - 50, a.y - (lat - a.lat) * 110540));
+    const dx = (lon - a.lastLon) * 111320 * cosL;
+    const dy = (lat - a.lastLat) * 110540;
+    const dm = Math.hypot(dx, dy);
+    a.lastLat = lat; a.lastLon = lon;
+    if (dm > 0.8 && dm < 400) {
+      dispatch({ type: 'SYNC_POS', x, y, heading: Math.atan2(-dy, dx), dm });
+    }
+  }, [dispatch]);
+  const onNetChat = useCallback((m: { name?: string; text?: string }) => dispatch({ type: 'NET_CHAT', author: m.name ?? 'Гость', text: m.text ?? '' }), [dispatch]);
+  const onNetCapture = useCallback((m: { hexId?: string; name?: string; faction?: string; level?: number }) =>
+    dispatch({ type: 'NET_CAPTURE', hexId: m.hexId, name: m.name, faction: m.faction, level: m.level }), [dispatch]);
+
+  return (
+    <SensorsProvider cb={{ onSteps, onHeading, onGpsMove }}>
+      <NetProvider
+        self={{ name: state.profile.name || 'Командир', faction: state.profile.faction ?? 'helios', level: state.profile.level }}
+        onChat={onNetChat}
+        onCapture={onNetCapture}
+      >
+        {children}
+      </NetProvider>
+    </SensorsProvider>
+  );
+}
+
 function Shell() {
   const { state, dispatch } = useGame();
+  const net = useNet();
   const [tab, setTab] = useState<Tab>('map');
   const [battleHex, setBattleHex] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [boot, setBoot] = useState(true);
-  const gpsPrev = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setBoot(false), 1500);
     return () => clearTimeout(t);
   }, []);
 
+  // трансляция своих захватов в P2P-комнату
+  const prevCaptures = useRef(state.stats.captures ?? 0);
   useEffect(() => {
-    if (!state.settings.gps || typeof navigator === 'undefined' || !navigator.geolocation) return;
-    const id = navigator.geolocation.watchPosition(
-      (p) => {
-        const c = { x: p.coords.longitude, y: p.coords.latitude };
-        if (gpsPrev.current) {
-          const dx = (c.x - gpsPrev.current.x) * 71000;
-          const dy = (c.y - gpsPrev.current.y) * 111000;
-          const dm = Math.hypot(dx, dy);
-          if (dm > 1 && dm < 500) {
-            dispatch({ type: 'SYNC_POS', x: state.pos.x + dx, y: state.pos.y - dy, heading: Math.atan2(dy, dx), dm });
-          }
-        }
-        gpsPrev.current = c;
-      },
-      () => dispatch({ type: 'SET_SETTINGS', patch: { gps: false } }),
-      { enableHighAccuracy: true },
-    );
-    return () => navigator.geolocation.clearWatch(id);
-  }, [state.settings.gps, dispatch, state.pos.x, state.pos.y]);
+    const cur = state.stats.captures ?? 0;
+    if (cur > prevCaptures.current && net.status === 'connected') {
+      const t = [...state.terrs].filter((x) => x.capturedAt).sort((a, b) => (b.capturedAt ?? 0) - (a.capturedAt ?? 0))[0];
+      if (t) net.capture(t.id, t.name);
+    }
+    prevCaptures.current = cur;
+  }, [state.stats.captures, state.terrs, net]);
 
   if (!state.profile.faction) {
     return (
@@ -281,7 +316,9 @@ function Shell() {
 export default function App() {
   return (
     <GameProvider>
-      <Shell />
+      <SessionProviders>
+        <Shell />
+      </SessionProviders>
     </GameProvider>
   );
 }

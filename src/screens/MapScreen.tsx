@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGame, nearHex, canAttackNow } from '../game/state';
+import { useSensors } from '../game/sensors';
 import {
   generateWorld, WORLD, hexPath, terrAt, ownerColor, ownerName, rateFor, TYPE_LABEL, FACTIONS, RES_META,
   revealRadius, fmt, fmtDur, RECIPES, FACTORIES, PART_MAP, prodSlots, hexRing, ATTACK_ENERGY_COST,
@@ -90,6 +91,8 @@ export default function MapScreen({ onAttack }: { onAttack: (hexId: string) => v
   const lastSync = useRef(0);
   const [sel, setSel] = useState<string | null>(null);
   const [dashCd, setDashCd] = useState(0);
+  const [sensorPanel, setSensorPanel] = useState(false);
+  const sensors = useSensors();
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef(0);
   const drag = useRef({ sx: 0, sy: 0, cx: 0, cy: 0, moved: false, t: 0 });
@@ -318,6 +321,13 @@ export default function MapScreen({ onAttack }: { onAttack: (hexId: string) => v
   };
 
   const selTerr = useMemo(() => (sel ? state.terrs.find((t) => t.id === sel) ?? null : null), [sel, state.terrs]);
+  const bearing = useMemo(() => {
+    if (!selTerr) return null;
+    const dx = selTerr.x - state.pos.x, dy = selTerr.y - state.pos.y;
+    const deg = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+    const rel = sensors.headingDeg != null ? (deg - sensors.headingDeg + 360) % 360 : deg;
+    return { deg: Math.round(deg), rel, dist: Math.round(Math.hypot(dx, dy)) };
+  }, [selTerr, state.pos.x, state.pos.y, sensors.headingDeg]);
   const here = terrAt(state.pos.x, state.pos.y, state.terrs);
   const night = (() => { const h = new Date().getHours(); return h >= 23 || h < 7; })();
   const shieldOn = state.base.shieldUntil > Date.now() || night;
@@ -409,7 +419,29 @@ export default function MapScreen({ onAttack }: { onAttack: (hexId: string) => v
         <button className="btn-ghost chamfer-sm p-2.5" onClick={() => { cam.current.tz = Math.max(0.55, cam.current.tz * 0.8); }} aria-label="Отдалить"><Icon name="minus" size={18} /></button>
         <button className="btn-ghost chamfer-sm p-2.5 text-acc" onClick={() => { cam.current.follow = true; }} aria-label="Ко мне"><Icon name="center" size={18} /></button>
         <button className={`chamfer-sm p-2.5 border ${Date.now() < dashCd ? 'btn-ghost opacity-50' : 'btn-warn'}`} onClick={dash} aria-label="Марш-бросок"><Icon name="walk" size={18} /></button>
+        <button className={`chamfer-sm p-2.5 border ${sensors.gps === 'on' || sensors.motion === 'on' ? 'btn-acc' : 'btn-ghost'}`} onClick={() => setSensorPanel(true)} aria-label="Датчики"><Icon name="radar" size={18} /></button>
       </div>
+
+      {/* чипы датчиков */}
+      <div className="absolute left-2 top-2 flex flex-col gap-1 items-start pointer-events-none">
+        <div className="chamfer-xs bg-bg0/80 border border-line px-2 py-1 flex items-center gap-2 font-mono text-[9px]">
+          <span className={`w-1.5 h-1.5 rounded-full ${sensors.gps === 'on' ? 'bg-ok' : sensors.gps === 'starting' ? 'bg-amb blink' : 'bg-faint'}`} />
+          <span className={sensors.gps === 'on' ? 'text-ok' : 'text-faint'}>GPS{sensors.gpsAccuracy != null ? ` ±${sensors.gpsAccuracy}м` : sensors.gps === 'denied' ? ' нет доступа' : ' сим'}</span>
+          <span className="text-dim">{fmt(sensors.steps)} шаг</span>
+          <span className="text-dim">{sensors.headingDeg != null ? `${sensors.headingDeg}°` : 'С'} </span>
+        </div>
+      </div>
+
+      {/* компас-пеленг к выбранной зоне */}
+      {bearing && selTerr && (
+        <button onClick={() => { cam.current.follow = false; }} className="absolute left-1/2 -translate-x-1/2 top-2 chamfer-sm bg-bg0/85 border border-acc/40 px-3 py-1.5 flex items-center gap-2 anim-in">
+          <svg width="16" height="16" viewBox="0 0 16 16" style={{ transform: `rotate(${bearing.rel}deg)` }}>
+            <path d="M8 1 12 12 8 9.5 4 12z" fill="#35e0c8" />
+          </svg>
+          <span className="font-mono text-[10px] text-acc font-bold">{fmt(bearing.dist)} м</span>
+          <span className="font-mono text-[9px] text-dim">{selTerr.name.length > 14 ? selTerr.name.slice(0, 13) + '…' : selTerr.name} · {bearing.deg}°</span>
+        </button>
+      )}
       {/* джойстик */}
       <div className="absolute left-4 bottom-8 flex flex-col items-center gap-2">
         <div className="flex gap-1">
@@ -453,6 +485,40 @@ export default function MapScreen({ onAttack }: { onAttack: (hexId: string) => v
       {/* карточка зоны */}
       <Sheet open={!!selTerr} onClose={() => setSel(null)} title={selTerr?.name ?? ''}>
         {selTerr && <TerrCard t={selTerr} state={state} dispatch={dispatch} onAttack={onAttack} close={() => setSel(null)} />}
+      </Sheet>
+
+      {/* панель датчиков */}
+      <Sheet open={sensorPanel} onClose={() => setSensorPanel(false)} title="Датчики устройства">
+        <div className="space-y-2.5">
+          {([
+            ['GPS-модуль', sensors.gps, sensors.gps === 'on' ? `точность ±${sensors.gpsAccuracy ?? '—'} м · позиция привязана к сектору` : 'реальное перемещение вместо джойстика'],
+            ['Акселерометр', sensors.motion, sensors.motion === 'on' ? `шаги: ${fmt(sensors.steps)} · питают энергию развёртывания` : 'подсчёт реальных шагов'],
+            ['Компас', sensors.compass, sensors.compass === 'on' ? `курс ${sensors.headingDeg ?? 0}° · пеленг к зонам` : 'наведение маркера и пеленга'],
+          ] as const).map(([name, st, sub]) => (
+            <div key={name} className="panel-deep chamfer-xs p-3 flex items-center gap-3">
+              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${st === 'on' ? 'bg-ok' : st === 'starting' ? 'bg-amb blink' : st === 'denied' ? 'bg-danger' : 'bg-faint'}`} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] font-bold">{name} <span className="font-mono text-[9px] text-faint uppercase">{st === 'off' ? 'выкл' : st === 'starting' ? 'запуск…' : st === 'on' ? 'активен' : st === 'denied' ? 'запрещён' : 'нет на устройстве'}</span></div>
+                <div className="text-[10px] text-dim truncate">{sub}</div>
+              </div>
+              {name === 'GPS-модуль' && (
+                sensors.gps === 'on'
+                  ? <button className="btn-ghost chamfer-xs px-2.5 py-1.5 text-[10px] font-bold" onClick={sensors.stopGps}>СТОП</button>
+                  : <button className="btn-acc chamfer-xs px-2.5 py-1.5 text-[10px] font-bold" onClick={sensors.startGps}>СТАРТ</button>
+              )}
+            </div>
+          ))}
+          {sensors.needGesture && (
+            <button className="btn-acc chamfer w-full py-3.5 text-sm" onClick={sensors.enableAll}>ВКЛЮЧИТЬ ДАТЧИКИ</button>
+          )}
+          <p className="text-[10px] text-faint leading-snug">
+            На iPhone доступ к движению и компасу выдаётся только по явному нажатию. Координаты обрабатываются локально,
+            точная позиция никогда не передаётся другим игрокам — только принадлежность зон. Без датчиков игра работает в режиме симуляции (джойстик).
+          </p>
+          <button className="btn-ghost chamfer-xs w-full py-2 text-[11px]" onClick={() => dispatch({ type: 'SET_SETTINGS', patch: { gps: !state.settings.gps } })}>
+            Учёт ходьбы: GPS-режим {state.settings.gps ? 'ВКЛ' : 'выкл'} {state.settings.gps ? '(шаги не дублируют метры)' : '(метры считаются по шагам)'}
+          </button>
+        </div>
       </Sheet>
     </div>
   );

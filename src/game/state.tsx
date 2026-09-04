@@ -609,6 +609,11 @@ function reducer(state: GameState, a: Action): GameState {
       return s;
     }
 
+    case 'NET_CHAT': {
+      s.alliance.chat = [...s.alliance.chat, { id: uid(), author: `${a.author} · P2P`, text: a.text as string, at: nowMs() }].slice(-50);
+      return s;
+    }
+
     case 'RELOCATE_BASE': {
       const t = s.terrs.find((x) => x.id === a.hexId) as Territory;
       if (!t || t.owner !== s.profile.faction || t.id === s.base.hexId) return state;
@@ -619,6 +624,43 @@ function reducer(state: GameState, a: Action): GameState {
       s.raidShieldUntil = nowMs() + 10 * 60000;
       qToast(s, 'Штаб перенесён', 'ok', `Новая позиция: «${t.name}». Щит 30 мин.`);
       pushLog(s, 'info', `Штаб перенесён в «${t.name}».`);
+      return s;
+    }
+
+    case 'SENSOR_STEPS': {
+      const n = a.count as number;
+      if (n <= 0) return state;
+      s.stats.steps = (s.stats.steps ?? 0) + n;
+      s.stats.dailySteps = (s.stats.dailySteps ?? 0) + n;
+      s.weekly.counters.weekWalk = (s.weekly.counters.weekWalk ?? 0) + n * 0.75;
+      // если GPS-модуль ведёт учёт сам, шаги не дублируют метры
+      if (!s.settings.gps) {
+        const dm = n * 0.75;
+        s.stats.walkM = (s.stats.walkM ?? 0) + dm;
+        s.stats.dailyWalk = (s.stats.dailyWalk ?? 0) + dm;
+        s.deployEnergy = Math.min(100, s.deployEnergy + dm * 0.0035);
+      }
+      return s;
+    }
+
+    case 'SET_HEADING': {
+      const deg = a.deg as number;
+      s.heading = (deg * Math.PI) / 180 - Math.PI / 2;
+      return s;
+    }
+
+    case 'NET_CAPTURE': {
+      const t = s.terrs.find((x) => x.id === (a.hexId as string));
+      const f = a.faction as string;
+      if (!t || !['helios', 'azur', 'ferrum'].includes(f)) return state;
+      if (t.owner === f) return state;
+      const wasMine = t.owner === s.profile.faction;
+      t.owner = f as FactionId;
+      t.garrison = { power: 30 + (a.level as number ?? 1) * 6, size: 1 };
+      t.capturedAt = nowMs();
+      t.attackReadyAt = nowMs() + 90000;
+      pushLog(s, wasMine ? 'alert' : 'combat', `P2P: командир ${a.name} (${FACTIONS[f as FactionId].short}) захватывает «${t.name}».`);
+      if (s.settings.notifCombat) qToast(s, wasMine ? 'Вашу зону захватили!' : 'Захват союзника по сети', wasMine ? 'combat' : 'info', `«${t.name}» — ${a.name}`);
       return s;
     }
 
